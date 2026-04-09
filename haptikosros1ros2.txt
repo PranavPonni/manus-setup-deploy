@@ -1,0 +1,677 @@
+# Haptikos Setup and Allegro Deployment Guide (Ubuntu 20.04)
+
+This guide puts the full workflow in one place:
+
+1. launch the **Haptikos Core app** on Ubuntu,
+2. install and test the **Haptikos Python API**,
+3. connect the exoskeletons and calibrate them,
+4. deploy the stream into an Allegro Hand bridge script such as `haptikosallegro.py`.
+
+It is written around the setup you already tested successfully:
+
+- Ubuntu 20.04
+- Haptikos Linux app folder containing:
+  - `Haptikos App.x86_64`
+  - `Haptikos App_Data/`
+  - `UnityPlayer.so`
+  - `Setup.bash`
+- Haptikos API repo cloned locally at `~/HaptikosAPI`
+- Python virtual environment at `~/HaptikosAPI/.venv`
+- Allegro Hand on ROS 1 / Ubuntu 20.04
+
+---
+
+## 1. What each component does
+
+### Haptikos Core app
+This is the runtime bridge between the Haptikos exoskeleton hardware and your PC. The official Haptikos docs describe it as the application used to connect the exoskeletons, import the license, create projects/profiles, calibrate the hand, and stream data for development/testing.
+
+### Haptikos Python API
+This is the Python wrapper that lets your Python script read hand data from the Core app.
+
+### `haptikosallegro.py`
+This is your bridge script. Its job is usually:
+
+- read Haptikos hand/finger data from the API,
+- convert or retarget that data into Allegro joint targets,
+- publish or send those targets to the Allegro Hand driver.
+
+---
+
+## 2. Recommended folder layout
+
+A clean layout on Ubuntu could look like this:
+
+```bash
+/home/handlingteam2/
+├── HaptikosAPI/
+│   ├── .venv/
+│   ├── Haptikos_py/
+│   ├── examples/
+│   └── ...
+├── HaptikosApp/
+│   └── L20260406125334 - New Board/
+│       ├── Haptikos App.x86_64
+│       ├── Haptikos App_Data/
+│       ├── Setup.bash
+│       └── UnityPlayer.so
+└── HASA/
+    └── ... your Allegro/ROS workspace ...
+```
+
+---
+
+## 3. Launch the Haptikos Core app on Ubuntu 20.04
+
+Your downloaded app looks like a **Unity Linux standalone build**. In this layout:
+
+- `Haptikos App.x86_64` is the executable,
+- `UnityPlayer.so` is the Unity runtime library,
+- `Haptikos App_Data/` is the Unity data folder and must stay beside the executable,
+- `Setup.bash` may set extra runtime variables before launch.
+
+### 3.1 Go to the app folder
+
+```bash
+cd ~/HaptikosApp/'L20260406125334 - New Board'
+ls -l
+```
+
+### 3.2 Make the app executable
+
+```bash
+chmod +x "Haptikos App.x86_64"
+chmod +x Setup.bash
+```
+
+### 3.3 Launch the app
+
+Try this first:
+
+```bash
+./"Haptikos App.x86_64"
+```
+
+If it does not launch cleanly, try launching after sourcing the vendor setup script:
+
+```bash
+source ./Setup.bash
+./"Haptikos App.x86_64"
+```
+
+If you prefer a one-line launch command:
+
+```bash
+cd ~/HaptikosApp/'L20260406125334 - New Board' && chmod +x "Haptikos App.x86_64" Setup.bash && source ./Setup.bash && ./"Haptikos App.x86_64"
+```
+
+### 3.4 If the app still fails to start
+
+Run these diagnostics:
+
+```bash
+cd ~/HaptikosApp/'L20260406125334 - New Board'
+file "Haptikos App.x86_64"
+cat Setup.bash
+ldd "Haptikos App.x86_64"
+./"Haptikos App.x86_64"
+```
+
+Typical problems:
+
+- executable permission missing,
+- a missing shared library,
+- running from the wrong directory,
+- the `_Data` folder not being next to the executable.
+
+---
+
+## 4. First-time setup inside the Haptikos Core app
+
+Once the app opens, follow this order.
+
+### 4.1 Wear and power the exoskeletons
+
+- Put on the exoskeleton(s) correctly.
+- Connect the dongle to the PC.
+- Power on the exoskeletons.
+- Wait for the green light that indicates the device is active/connected.
+
+### 4.2 Import the license
+
+The first time the Core app opens, import the `.json` license file that came with the exoskeleton pair.
+
+### 4.3 Create a project
+
+- Click **Create New Project**.
+- Confirm creation.
+
+### 4.4 Create a profile
+
+The profile stores user-specific calibration information such as:
+
+- finger length data,
+- hand direction.
+
+### 4.5 Calibrate
+
+The official calibration flow is:
+
+- **Finger calibration**: press **Spacebar**.
+- **Hand direction calibration**: face the screen direction and press **R**.
+- Keep **at least the right exoskeleton connected** for calibration.
+
+### 4.6 Confirm streaming is alive
+
+When calibration is complete, the app should show a 3D view of the hand(s), connected devices, and battery status.
+
+If your Python example previously showed:
+
+```text
+Hand data is not valid: Connection timeout, Haptikos Core app is not responding
+```
+
+that means the Python API was fine but the Core app was not running or not fully connected/calibrated yet.
+
+---
+
+## 5. Install the Haptikos Python API on Ubuntu 20.04
+
+Your repo structure shows that the Python package is inside `Haptikos_py/`, not at the repo root.
+
+### 5.1 Activate the virtual environment
+
+```bash
+cd ~/HaptikosAPI
+source .venv/bin/activate
+```
+
+If the virtual environment does not exist yet:
+
+```bash
+cd ~/HaptikosAPI
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install --upgrade pip setuptools wheel
+```
+
+### 5.2 Install the Python package from the correct subfolder
+
+```bash
+python3 -m pip install -e ./Haptikos_py
+```
+
+### 5.3 Patch the Python 3.8 annotation issue
+
+On Ubuntu 20.04, your environment is using Python 3.8. The package uses newer annotation syntax that caused import errors. This patch avoids evaluation of those annotations at import time.
+
+```bash
+python3 - <<'PY'
+from pathlib import Path
+p = Path("Haptikos_py/HaptikosAPI/_core.py")
+text = p.read_text()
+if "from __future__ import annotations" not in text.splitlines()[:5]:
+    p.write_text("from __future__ import annotations\n" + text)
+    print("Patched _core.py")
+else:
+    print("_core.py already patched")
+PY
+```
+
+### 5.4 Export the Haptikos shared library path
+
+```bash
+export LD_LIBRARY_PATH=$PWD/Haptikos_py/HaptikosAPI/libs:$LD_LIBRARY_PATH
+```
+
+### 5.5 Test the import
+
+```bash
+python3 -c "import HaptikosAPI; print(HaptikosAPI.__file__)"
+```
+
+If this prints a valid package path, the Python wrapper is installed correctly.
+
+---
+
+## 6. Test the Haptikos API before touching Allegro
+
+Use the shipped example first.
+
+```bash
+cd ~/HaptikosAPI
+source .venv/bin/activate
+export LD_LIBRARY_PATH=$PWD/Haptikos_py/HaptikosAPI/libs:$LD_LIBRARY_PATH
+python3 examples/example.py
+```
+
+### Expected behavior
+
+- If the Core app is **not** running or not connected, you may get a timeout.
+- If the Core app **is** running and the exoskeleton is connected/calibrated, the example should fetch valid hand data.
+
+Only move to Allegro after this example works.
+
+---
+
+## 7. Allegro-side prerequisites
+
+Before running `haptikosallegro.py`, make sure the Allegro side is already working by itself.
+
+### 7.1 Bring up ROS and the Allegro driver
+
+The exact launch file depends on your setup, but the general sequence is:
+
+```bash
+source /opt/ros/noetic/setup.bash
+source /path/to/your/allegro_workspace/devel/setup.bash
+roscore
+```
+
+In a second terminal:
+
+```bash
+source /opt/ros/noetic/setup.bash
+source /path/to/your/allegro_workspace/devel/setup.bash
+# launch your normal Allegro hand driver / bringup here
+```
+
+### 7.2 Confirm the Allegro topics exist
+
+Common topics in your earlier Allegro work are:
+
+- command: `/allegroHand_0/joint_cmd`
+- state: `/allegroHand_0/joint_states`
+
+Check them:
+
+```bash
+rostopic list | grep allegro
+rostopic echo /allegroHand_0/joint_states
+```
+
+If your namespace differs, adjust the script accordingly.
+
+### 7.3 Safety check
+
+Before streaming any teleoperation targets:
+
+- home the Allegro Hand,
+- verify torque/gains are sane,
+- confirm joint direction signs,
+- keep emergency stop access ready,
+- start with low movement scaling.
+
+---
+
+## 8. What `haptikosallegro.py` should do
+
+Even if your exact script differs, the deployment logic is usually the same:
+
+1. connect to Haptikos via `HaptikosAPI`,
+2. read hand/finger data in a loop,
+3. map Haptikos finger states to Allegro joints,
+4. smooth / clamp the command,
+5. publish a `sensor_msgs/JointState` command (or your driver’s expected message),
+6. monitor joint feedback.
+
+### Minimal control pipeline
+
+```text
+Haptikos Core app -> Haptikos Python API -> haptikosallegro.py -> ROS joint command topic -> Allegro driver -> Allegro Hand
+```
+
+### Strong recommendation
+
+Do not send raw exoskeleton values directly to Allegro. Use:
+
+- a calibrated mapping,
+- per-joint limits,
+- velocity limiting,
+- smoothing,
+- a known home/reference pose.
+
+---
+
+## 9. Template launch procedure for `haptikosallegro.py`
+
+Use three terminals.
+
+### Terminal 1: Haptikos Core app
+
+```bash
+cd ~/HaptikosApp/'L20260406125334 - New Board'
+source ./Setup.bash
+./"Haptikos App.x86_64"
+```
+
+Then inside the app:
+
+- connect the exoskeletons,
+- import license if needed,
+- open the project/profile,
+- calibrate with **Spacebar** and **R**,
+- confirm the 3D hand view is updating.
+
+### Terminal 2: ROS + Allegro
+
+```bash
+source /opt/ros/noetic/setup.bash
+source /path/to/your/allegro_workspace/devel/setup.bash
+roscore
+```
+
+Then in another ROS terminal:
+
+```bash
+source /opt/ros/noetic/setup.bash
+source /path/to/your/allegro_workspace/devel/setup.bash
+# launch your Allegro driver here
+```
+
+### Terminal 3: Haptikos Python bridge script
+
+```bash
+cd ~/HaptikosAPI
+source .venv/bin/activate
+export LD_LIBRARY_PATH=$PWD/Haptikos_py/HaptikosAPI/libs:$LD_LIBRARY_PATH
+python3 /full/path/to/haptikosallegro.py
+```
+
+If your script lives inside another workspace, replace `/full/path/to/haptikosallegro.py` with the real path.
+
+---
+
+## 10. Example skeleton for `haptikosallegro.py`
+
+Use this as a reference structure only. Adapt names and mapping to your actual driver.
+
+```python
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import time
+import numpy as np
+import rospy
+from sensor_msgs.msg import JointState
+from HaptikosAPI import HaptikosClient, HaptikosDataFormat
+
+JOINT_NAMES = [f"joint_{i}.0" for i in range(16)]
+HOME = np.array([0.0] * 16, dtype=float)
+ALPHA = 0.2  # smoothing
+MAX_DELTA = 0.03  # rad per cycle, example safety clamp
+
+
+def clamp_step(target, current, max_delta):
+    delta = np.clip(target - current, -max_delta, max_delta)
+    return current + delta
+
+
+def map_haptikos_to_allegro(hand_data):
+    # TODO: replace this with your calibrated mapping.
+    # Convert Haptikos finger values into 16 Allegro joint angles.
+    q = HOME.copy()
+
+    # Example placeholder logic only:
+    # q[0:4]   <- index finger joints
+    # q[4:8]   <- middle finger joints
+    # q[8:12]  <- ring finger joints
+    # q[12:16] <- thumb joints
+
+    return q
+
+
+def main():
+    rospy.init_node("haptikos_allegro_bridge")
+    pub = rospy.Publisher("/allegroHand_0/joint_cmd", JointState, queue_size=1)
+    rate = rospy.Rate(30)
+
+    client = HaptikosClient()
+    current = HOME.copy()
+
+    while not rospy.is_shutdown():
+        hand_data = client.get_hand_data(HaptikosDataFormat.DEFAULT)
+        if hand_data is None:
+            rospy.logwarn_throttle(2.0, "No valid Haptikos hand data")
+            rate.sleep()
+            continue
+
+        target = map_haptikos_to_allegro(hand_data)
+        target = clamp_step(target, current, MAX_DELTA)
+        current = ALPHA * target + (1 - ALPHA) * current
+
+        msg = JointState()
+        msg.header.stamp = rospy.Time.now()
+        msg.name = JOINT_NAMES
+        msg.position = current.tolist()
+        pub.publish(msg)
+
+        rate.sleep()
+
+
+if __name__ == "__main__":
+    main()
+```
+
+---
+
+## 11. Mapping strategy for Haptikos -> Allegro
+
+This is the most important part of deployment.
+
+### 11.1 Start with a reduced mapping
+
+Do **not** begin with full 16-DoF teleoperation. Start with one finger first:
+
+- map only index flexion,
+- then thumb,
+- then add more joints gradually.
+
+### 11.2 Use a reference pose on both sides
+
+At the start of the script:
+
+- record a neutral Haptikos hand pose,
+- align it with a safe Allegro home pose,
+- compute motion relative to that reference.
+
+### 11.3 Add sign and scale calibration
+
+For each Allegro joint, tune:
+
+- offset,
+- sign,
+- scale,
+- min limit,
+- max limit.
+
+A simple formulation is:
+
+```python
+q_cmd = q_home + sign * scale * (haptikos_value - haptikos_neutral)
+q_cmd = np.clip(q_cmd, q_min, q_max)
+```
+
+### 11.4 Add filtering and safety
+
+Always include:
+
+- low-pass filtering,
+- rate limiting,
+- deadband for tiny motions,
+- fallback behavior if Haptikos data becomes invalid.
+
+---
+
+## 12. Full command summary
+
+### Launch Core app
+
+```bash
+cd ~/HaptikosApp/'L20260406125334 - New Board'
+chmod +x "Haptikos App.x86_64" Setup.bash
+source ./Setup.bash
+./"Haptikos App.x86_64"
+```
+
+### Install Python API
+
+```bash
+cd ~/HaptikosAPI
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install --upgrade pip setuptools wheel
+python3 -m pip install -e ./Haptikos_py
+python3 - <<'PY'
+from pathlib import Path
+p = Path("Haptikos_py/HaptikosAPI/_core.py")
+text = p.read_text()
+if "from __future__ import annotations" not in text.splitlines()[:5]:
+    p.write_text("from __future__ import annotations\n" + text)
+PY
+export LD_LIBRARY_PATH=$PWD/Haptikos_py/HaptikosAPI/libs:$LD_LIBRARY_PATH
+python3 -c "import HaptikosAPI; print(HaptikosAPI.__file__)"
+python3 examples/example.py
+```
+
+### Run the Allegro bridge
+
+```bash
+source /opt/ros/noetic/setup.bash
+source /path/to/your/allegro_workspace/devel/setup.bash
+export LD_LIBRARY_PATH=~/HaptikosAPI/Haptikos_py/HaptikosAPI/libs:$LD_LIBRARY_PATH
+source ~/HaptikosAPI/.venv/bin/activate
+python3 /full/path/to/haptikosallegro.py
+```
+
+---
+
+## 13. Troubleshooting
+
+### Problem: `pip install -e .` fails at the repo root
+
+Cause: the Python package is not at `~/HaptikosAPI`, it is under `~/HaptikosAPI/Haptikos_py`.
+
+Fix:
+
+```bash
+python3 -m pip install -e ./Haptikos_py
+```
+
+### Problem: import fails with a type annotation error on Python 3.8
+
+Example:
+
+```text
+TypeError: unsupported operand type(s) for |: '_ctypes.PyCStructType' and 'NoneType'
+```
+
+Fix: patch `_core.py` with `from __future__ import annotations` as shown above.
+
+### Problem: example says Core app is not responding
+
+Cause: the Core app is not running, the exoskeleton is not connected, license/profile/calibration is incomplete, or the app is not yet streaming.
+
+Fix:
+
+- launch the Core app,
+- connect dongle and exoskeleton,
+- import license,
+- create/open project and profile,
+- calibrate,
+- rerun `python3 examples/example.py`.
+
+### Problem: `.x86_64` will not run
+
+Fixes:
+
+```bash
+chmod +x "Haptikos App.x86_64"
+chmod +x Setup.bash
+source ./Setup.bash
+./"Haptikos App.x86_64"
+```
+
+### Problem: `ModuleNotFoundError: HaptikosAPI`
+
+Fix:
+
+```bash
+cd ~/HaptikosAPI
+source .venv/bin/activate
+python3 -m pip install -e ./Haptikos_py
+```
+
+### Problem: library loading error for `libHaptikosCore.so`
+
+Fix:
+
+```bash
+export LD_LIBRARY_PATH=~/HaptikosAPI/Haptikos_py/HaptikosAPI/libs:$LD_LIBRARY_PATH
+```
+
+### Problem: Allegro hand moves in wrong direction or too much
+
+Fix:
+
+- invert per-joint signs,
+- reduce scaling,
+- clamp limits tighter,
+- lower update rate,
+- increase smoothing,
+- begin with one finger only.
+
+---
+
+## 14. Practical deployment order I recommend
+
+Do not try to debug everything at once. Use this order:
+
+1. **Launch Core app only** and confirm hand visuals update.
+2. **Run `examples/example.py`** and confirm valid Haptikos data arrives.
+3. **Bring up Allegro alone** and confirm command/state topics work.
+4. **Run `haptikosallegro.py` with all commands disabled** except logging.
+5. **Enable one finger mapping** with small limits.
+6. **Expand to more joints** only after the first finger is reliable.
+
+That order will save you a lot of time.
+
+---
+
+## 15. Notes about assumptions in this guide
+
+This guide is exact for:
+
+- your Haptikos Linux app launch layout,
+- your observed Haptikos Python package structure,
+- the Python 3.8 patch you needed,
+- the tested `examples/example.py` flow.
+
+The final `haptikosallegro.py` deployment commands are correct in structure, but the exact details may need minor edits depending on:
+
+- where your script lives,
+- your Allegro ROS namespace,
+- the joint mapping function used in your script,
+- whether your driver expects `JointState` or another message type.
+
+If your script already exists, the fastest next step is to open `haptikosallegro.py` and verify these four things:
+
+1. import path for `HaptikosAPI`,
+2. ROS topic name for Allegro commands,
+3. message type used for publishing,
+4. Haptikos-to-Allegro joint mapping function.
+
+---
+
+## 16. Official Haptikos doc items this guide is based on
+
+The official docs describe these core steps:
+
+- download and launch the Core application,
+- import the license JSON,
+- create a project and profile,
+- calibrate fingers with **Spacebar**,
+- calibrate hand direction with **R**,
+- keep at least the right exoskeleton connected during calibration,
+- use the Core app as the bridge for streaming/development.
+

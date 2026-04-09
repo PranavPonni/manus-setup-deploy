@@ -1,0 +1,352 @@
+# MANUS Gloves → Allegro Hand Teleoperation (ROS2, Ubuntu)
+
+## 📌 Overview
+
+This guide sets up **MANUS MetaGloves** on Ubuntu and connects them to an **Allegro Hand** using ROS2.
+
+Pipeline:
+
+```
+MANUS Gloves
+   ↓
+MANUS SDK (Integrated Mode)
+   ↓
+ROS2 Bridge Node
+   ↓
+Retargeting (MANUS → Allegro)
+   ↓
+Allegro Hand
+```
+
+---
+
+## 🖥️ Requirements
+
+* Ubuntu 20.04 / 22.04
+* ROS2
+* MANUS SDK (v3.x)
+* Allegro Hand + ROS2 driver
+* USB dongle / bodypack
+
+---
+
+## 🔧 1. Install Dependencies
+
+```bash
+sudo apt update
+sudo apt install -y \
+  build-essential \
+  cmake \
+  g++ \
+  libusb-1.0-0-dev \
+  libudev-dev \
+  zlib1g-dev \
+  libncurses5-dev \
+  python3-colcon-common-extensions \
+  ros-${ROS_DISTRO}-desktop
+```
+
+---
+
+## 🔌 2. Setup MANUS SDK
+
+### Download & Extract
+
+```bash
+cd ~/Downloads
+unzip ManusSDK_v3.1.1.zip
+```
+
+### udev Rules
+
+```bash
+sudo nano /etc/udev/rules.d/70-manus-hid.rules
+```
+
+Paste:
+
+```
+SUBSYSTEMS=="usb", ATTRS{idVendor}=="3325", MODE:="0666"
+SUBSYSTEMS=="usb", ATTRS{idVendor}=="1915", ATTRS{idProduct}=="83fd", MODE:="0666"
+KERNEL=="hidraw*", ATTRS{idVendor}=="3325", MODE:="0666"
+```
+
+Apply:
+
+```bash
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+sudo reboot
+```
+
+---
+
+## 🧠 3. Test MANUS SDK
+
+```bash
+cd ~/Downloads/ManusSDK_v3.1.1/SDKMinimalClient_Linux
+make clean && make
+LD_LIBRARY_PATH=./ManusSDK/lib ./SDKMinimalClient.out
+```
+
+Select:
+
+```
+2) Integrated Mode
+```
+
+✔ Dongle detected
+✔ Gloves connected
+
+---
+
+## 🤖 4. Create ROS2 Workspace
+
+```bash
+mkdir -p ~/manus_ros2_ws/src
+cd ~/manus_ros2_ws
+colcon build
+source install/setup.bash
+```
+
+---
+
+## 📦 5. Create ROS2 Package
+
+```bash
+cd ~/manus_ros2_ws/src
+ros2 pkg create manus_glove_bridge --build-type ament_cmake --dependencies rclcpp sensor_msgs std_msgs
+cd manus_glove_bridge
+cp -r ~/Downloads/ManusSDK_v3.1.1/ManusSDK .
+```
+
+---
+
+## 🔁 6. MANUS → ROS2 Node
+
+Create file:
+
+```bash
+nano src/manus_glove_node.cpp
+```
+
+Paste:
+
+```cpp
+#include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/msg/joint_state.hpp>
+#include "ManusSDK.h"
+
+class ManusGloveNode : public rclcpp::Node
+{
+public:
+    ManusGloveNode() : Node("manus_glove_node")
+    {
+        pub_ = this->create_publisher<sensor_msgs::msg::JointState>("/joint_states", 10);
+
+        CoreSdk_InitializeIntegrated();
+
+        timer_ = this->create_wall_timer(
+            std::chrono::milliseconds(20),
+            std::bind(&ManusGloveNode::publish_joint_state, this));
+    }
+
+    ~ManusGloveNode()
+    {
+        CoreSdk_ShutDown();
+    }
+
+private:
+    void publish_joint_state()
+    {
+        sensor_msgs::msg::JointState js;
+        js.header.stamp = this->now();
+
+        // TODO: Replace with real MANUS data
+        js.name = {"index_mcp"};
+        js.position = {0.5};
+
+        pub_->publish(js);
+    }
+
+    rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr pub_;
+    rclcpp::TimerBase::SharedPtr timer_;
+};
+
+int main(int argc, char** argv)
+{
+    rclcpp::init(argc, argv);
+    rclcpp::spin(std::make_shared<ManusGloveNode>());
+    rclcpp::shutdown();
+    return 0;
+}
+```
+
+---
+
+## ⚙️ 7. Update CMakeLists.txt
+
+Add:
+
+```cmake
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
+
+include_directories(
+  ManusSDK/include
+)
+
+link_directories(
+  ${CMAKE_CURRENT_SOURCE_DIR}/ManusSDK/lib
+)
+
+add_executable(manus_glove_node src/manus_glove_node.cpp)
+ament_target_dependencies(manus_glove_node rclcpp sensor_msgs std_msgs)
+
+target_link_libraries(manus_glove_node
+  ManusSDK_Integrated
+)
+
+install(TARGETS
+  manus_glove_node
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+ament_package()
+```
+
+---
+
+## 🔨 8. Build
+
+```bash
+cd ~/manus_ros2_ws
+source /opt/ros/${ROS_DISTRO}/setup.bash
+colcon build --symlink-install
+source install/setup.bash
+```
+
+---
+
+## 🦾 9. Start Allegro Hand
+
+```bash
+ros2 launch allegro_hand_controllers allegro_hand.launch.py
+```
+
+Check:
+
+```bash
+ros2 topic list | grep allegro
+```
+
+---
+
+## 🔄 10. Retargeting (Core Idea) - [use manusallegro.py]
+
+Map MANUS joints → Allegro joints:
+
+```python
+from sensor_msgs.msg import JointState
+
+cmd = JointState()
+
+cmd.name = [
+  "joint_0.0","joint_1.0","joint_2.0","joint_3.0",
+  "joint_4.0","joint_5.0","joint_6.0","joint_7.0",
+  "joint_8.0","joint_9.0","joint_10.0","joint_11.0",
+  "joint_12.0","joint_13.0","joint_14.0","joint_15.0"
+]
+
+cmd.position = [0.0] * 16
+
+# Example mapping (replace properly)
+cmd.position[0] = manus_index_mcp
+
+pub_allegro.publish(cmd)
+```
+
+---
+
+## 🚀 11. Run Everything
+
+### Terminal 1
+
+```bash
+source /opt/ros/${ROS_DISTRO}/setup.bash
+source ~/manus_ros2_ws/install/setup.bash
+ros2 run manus_glove_bridge manus_glove_node
+```
+
+### Terminal 2
+
+```bash
+source /opt/ros/${ROS_DISTRO}/setup.bash
+source <your_allegro_ros2_ws>/install/setup.bash
+ros2 launch allegro_hand_controllers allegro_hand.launch.py
+```
+
+### Terminal 3
+
+```bash
+python3 manusallegro.py
+```
+
+---
+
+## 📊 Debugging
+
+### Check MANUS device
+
+```bash
+lsusb | grep -E "3325|1915"
+```
+
+### Check ROS2 data
+
+```bash
+ros2 topic echo /joint_states
+```
+
+### Check Allegro command
+
+```bash
+ros2 topic echo /allegroHand_0/joint_cmd
+```
+
+---
+
+## ⚠️ Common Issues
+
+❌ No MANUS data → another Core is running
+❌ No Allegro motion → wrong mapping
+❌ Permission error → fix udev rules
+❌ Package not found → source `install/setup.bash`
+❌ Library not found → export `LD_LIBRARY_PATH`
+
+---
+
+## 🔮 Improvements
+
+* Smoothing (EMA)
+* Velocity limiting
+* IK-based retargeting
+* Calibration (neutral pose)
+
+---
+
+## 📌 Notes
+
+* Only ONE MANUS Integrated Core at a time
+* Do NOT use `sudo`
+* Connect gloves BEFORE running
+* ROS2 does NOT use `roscore`
+
+---
+
+## 👨‍💻 Author
+
+Pranav Ponnivalavan
+Waseda University — Sugano Lab
