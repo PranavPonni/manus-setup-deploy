@@ -1,0 +1,397 @@
+# Allegro Hand Setup and Launch Guide (ROS 2 Only)
+
+This guide is for a **ROS 2 only** Allegro Hand setup.
+It does **not** use `roscore`, `ros1_bridge`, or any ROS 1 packages.
+
+---
+
+## 1. Important: pick the correct Allegro Hand ROS 2 stack
+
+Wonik Robotics now has different official ROS 2 repositories depending on the hand model:
+
+- **Allegro Hand V4 / Plexus**
+  - Latest official ROS 2 stack: `Wonikrobotics-git/allegro_hand_ros2`
+  - Wonik describes it as a `ros2_control`-based stack for **V4** and **Plexus**.
+- **Allegro Hand V5 (4F)**
+  - Official ROS 2 package: `Wonikrobotics-git/allegro_hand_ros2_v5`
+
+If your lab setup is the older Allegro platform that was traditionally used with topics like `/allegroHand_0/...`, it is very likely **V4**.
+
+---
+
+## 2. Recommended OS / ROS version
+
+For the official ROS 2 Allegro packages shown in Wonik’s repos:
+
+- **Ubuntu 22.04**
+- **ROS 2 Humble**
+
+Do **not** mix ROS 1 and ROS 2 environments in the same shell.
+
+---
+
+## 3. Common prerequisites
+
+Before launching the hand:
+
+1. Install ROS 2 Humble.
+2. Make sure the **PCAN / CAN interface** for the Allegro Hand is installed and detected.
+3. Power on the hand correctly.
+4. Use a fresh shell that sources only ROS 2:
+
+```bash
+source /opt/ros/humble/setup.bash
+```
+
+You should **not** run:
+
+```bash
+roscore
+```
+
+for this ROS 2 only workflow.
+
+---
+
+## 4. ROS 2 only setup for Allegro Hand V4 / Plexus
+
+### 4.1 Which repo to use
+
+Wonik’s latest official ROS 2 stack for **V4 / Plexus** is:
+
+```bash
+https://github.com/Wonikrobotics-git/allegro_hand_ros2
+```
+
+Wonik’s older V4 Linux repository is now archived, but its `ros2_source/README.md` still gives the clearest documented Humble quick-start for V4.
+
+### 4.2 Build workflow (documented V4 ROS 2 path)
+
+```bash
+mkdir -p ~/allegro_v4_ros2
+cd ~/allegro_v4_ros2
+git clone https://github.com/Wonikrobotics-git/allegro_hand_linux_v4.git
+cd allegro_hand_linux_v4/ros2_source
+source /opt/ros/humble/setup.bash
+colcon build --symlink-install
+source install/setup.bash
+```
+
+### 4.3 Main launch file
+
+The main launch file is:
+
+```bash
+allegro_hand_controllers/allegro_hand.launch.py
+```
+
+### 4.4 Launch the hand
+
+For a **right hand**:
+
+```bash
+ros2 launch allegro_hand_controllers allegro_hand.launch.py HAND:=right
+```
+
+For a **left hand**:
+
+```bash
+ros2 launch allegro_hand_controllers allegro_hand.launch.py HAND:=left
+```
+
+### 4.5 Keyboard control node
+
+In a second terminal:
+
+```bash
+cd ~/allegro_v4_ros2/allegro_hand_linux_v4/ros2_source
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+ros2 run allegro_hand_keyboards allegro_hand_keyboard --ros-args -r /allegroHand/lib_cmd:=/allegroHand_0/lib_cmd
+```
+
+### 4.6 View model without hardware
+
+```bash
+ros2 launch allegro_hand_controllers view_hand.launch.py hand_side:=right
+```
+
+Change `right` to `left` if needed.
+
+### 4.7 Useful launch arguments for V4
+
+```bash
+NUM:=0
+CONTROLLER:=grasp
+CAN_DEVICE:=can0
+VISUALIZE:=true
+JSP_GUI:=true
+```
+
+Examples:
+
+Use PD controller:
+
+```bash
+ros2 launch allegro_hand_controllers allegro_hand.launch.py HAND:=right CONTROLLER:=pd
+```
+
+Specify CAN interface manually:
+
+```bash
+ros2 launch allegro_hand_controllers allegro_hand.launch.py HAND:=right CAN_DEVICE:=can0
+```
+
+Launch with visualization:
+
+```bash
+ros2 launch allegro_hand_controllers allegro_hand.launch.py HAND:=right VISUALIZE:=true
+```
+
+---
+
+## 5. ROS 2 only setup for Allegro Hand V5
+
+### 5.1 Official repo
+
+```bash
+https://github.com/Wonikrobotics-git/allegro_hand_ros2_v5.git
+```
+
+### 5.2 Install ROS 2 dependencies
+
+```bash
+sudo apt-get update
+sudo apt-get install -y \
+  ros-humble-xacro \
+  ros-humble-moveit \
+  ros-humble-controller-manager \
+  ros-humble-joint-state-broadcaster \
+  ros-humble-joint-trajectory-controller
+```
+
+### 5.3 Build
+
+```bash
+mkdir -p ~/allegro_v5_ros2
+cd ~/allegro_v5_ros2
+git clone https://github.com/Wonikrobotics-git/allegro_hand_ros2_v5.git
+source /opt/ros/humble/setup.bash
+colcon build
+source install/setup.bash
+```
+
+### 5.4 Main launch file
+
+The main launch file is also:
+
+```bash
+allegro_hand_controllers/allegro_hand.launch.py
+```
+
+### 5.5 Launch the hand
+
+At minimum, Wonik says you must specify:
+
+- `HAND:=right|left`
+- `TYPE:=A|B`
+
+Example:
+
+```bash
+ros2 launch allegro_hand_controllers allegro_hand.launch.py HAND:=right TYPE:=B
+```
+
+### 5.6 Optional V5 launch arguments
+
+```bash
+VISUALIZE:=true|false
+MOVEIT:=true|false
+GUI:=true|false
+CAN_DEVICE:=can0
+NUM:=0
+```
+
+Examples:
+
+Visualization:
+
+```bash
+ros2 launch allegro_hand_controllers allegro_hand.launch.py HAND:=right TYPE:=B VISUALIZE:=true
+```
+
+MoveIt 2:
+
+```bash
+ros2 launch allegro_hand_controllers allegro_hand.launch.py HAND:=right TYPE:=B MOVEIT:=true
+```
+
+GUI:
+
+```bash
+ros2 launch allegro_hand_controllers allegro_hand.launch.py HAND:=right TYPE:=B GUI:=true
+```
+
+### 5.7 Multi-hand example for V5
+
+First hand:
+
+```bash
+ros2 launch allegro_hand_controllers allegro_hand.launch.py HAND:=right TYPE:=A CAN_DEVICE:=can0 NUM:=0
+```
+
+Second hand:
+
+```bash
+ros2 launch allegro_hand_controllers allegro_hand.launch.py HAND:=left TYPE:=A CAN_DEVICE:=can1 NUM:=1
+```
+
+Keyboard control examples:
+
+```bash
+ros2 run allegro_hand_keyboards allegro_hand_keyboard --ros-args allegroHand_0/lib_cmd:=allegroHand_0/lib_cmd
+```
+
+```bash
+ros2 run allegro_hand_keyboards allegro_hand_keyboard --ros-args allegroHand_0/lib_cmd:=allegroHand_1/lib_cmd
+```
+
+---
+
+## 6. Minimal ROS 2 only bringup checklist
+
+Use this if you just want to verify the hand comes up.
+
+### V4
+
+```bash
+source /opt/ros/humble/setup.bash
+cd ~/allegro_v4_ros2/allegro_hand_linux_v4/ros2_source
+source install/setup.bash
+ros2 launch allegro_hand_controllers allegro_hand.launch.py HAND:=right
+```
+
+Then in another terminal:
+
+```bash
+source /opt/ros/humble/setup.bash
+cd ~/allegro_v4_ros2/allegro_hand_linux_v4/ros2_source
+source install/setup.bash
+ros2 topic list
+```
+
+### V5
+
+```bash
+source /opt/ros/humble/setup.bash
+cd ~/allegro_v5_ros2
+source install/setup.bash
+ros2 launch allegro_hand_controllers allegro_hand.launch.py HAND:=right TYPE:=B
+```
+
+Then in another terminal:
+
+```bash
+source /opt/ros/humble/setup.bash
+cd ~/allegro_v5_ros2
+source install/setup.bash
+ros2 topic list
+```
+
+---
+
+## 7. How to confirm the launch worked
+
+After launch, check:
+
+```bash
+ros2 node list
+ros2 topic list
+ros2 control list_controllers
+```
+
+For the V4 documented flow, Wonik says successful startup should print hardware status such as:
+
+- hardware version
+- firmware version
+- hardware type
+- temperature
+- serial number
+
+If launch succeeds but the hand does not move, first check:
+
+- power supply
+- CAN / PCAN driver setup
+- physical cable connection
+- correct `HAND:=left/right`
+- correct `CAN_DEVICE:=can0` if your system needs it
+
+---
+
+## 8. Important note about topic names
+
+Do **not** assume your ROS 1 topic names carry over exactly.
+
+After the hand starts, inspect the actual ROS 2 interfaces on your machine:
+
+```bash
+ros2 topic list | grep allegro
+ros2 node list
+ros2 param list
+```
+
+If you are adapting older scripts that used topics like:
+
+```bash
+/allegroHand_0/joint_states
+/allegroHand_0/joint_cmd
+```
+
+verify the exact ROS 2 names first before editing code.
+
+---
+
+## 9. What not to do in ROS 2 only mode
+
+Do **not** use any of these for a ROS 2 only Allegro setup:
+
+```bash
+roscore
+source /opt/ros/noetic/setup.bash
+ros1_bridge
+```
+
+If you source ROS 1 and ROS 2 in the same shell, you can get mixed environment issues and broken topic / package resolution.
+
+---
+
+## 10. Best practical recommendation
+
+- If your hand is **V4** and your lab still has older examples, start from the **V4 ROS 2 documented path** above.
+- If your hand is **V5**, use the **official `allegro_hand_ros2_v5` repo**.
+- If you want the most modern official V4/Plexus stack, migrate toward:
+
+```bash
+https://github.com/Wonikrobotics-git/allegro_hand_ros2
+```
+
+but keep the archived V4 `ros2_source` README nearby because it currently has the clearer command-level quick start.
+
+---
+
+## 11. Quick answer
+
+If you just wanted the ROS 2 only launch command style:
+
+### V4
+
+```bash
+ros2 launch allegro_hand_controllers allegro_hand.launch.py HAND:=right
+```
+
+### V5
+
+```bash
+ros2 launch allegro_hand_controllers allegro_hand.launch.py HAND:=right TYPE:=B
+```
+

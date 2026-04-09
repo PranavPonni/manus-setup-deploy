@@ -1,0 +1,351 @@
+# Allegro Hand Setup and Launch Guide (ROS 1)
+
+This guide is for a **native ROS 1 Allegro Hand bringup**. It is based on the setup details used in your previous chats, where the Allegro Hand driver/controller stack was launched from ROS 1 and exposed joint topics such as:
+
+- `/allegroHand_0/joint_states`
+- `/allegroHand_left_0/joint_states`
+- `/allegroHand/joint_cmd`
+- `/allegroHand_0/joint_cmd`
+
+The exact namespace can vary by package version and hand-side configuration, so always verify with `rostopic list` after launch.
+
+---
+
+## 1. Recommended environment
+
+- Ubuntu 20.04
+- ROS 1 Noetic
+- Allegro Hand ROS 1 driver/controller packages already built in your workspace
+- USB / CAN / Ethernet interface configured exactly as required by your Allegro driver package
+
+> In your earlier setup, the practical launch command used was:
+>
+> ```bash
+> roslaunch allegro_hand_controllers allegro_hand.launch HAND:=right TYPE:=A
+> ```
+>
+> So this guide assumes you have a package named `allegro_hand_controllers` that provides `allegro_hand.launch`.
+
+---
+
+## 2. Basic workspace setup
+
+If your Allegro packages are inside a catkin workspace:
+
+```bash
+cd ~/ros_ws
+catkin_make
+source devel/setup.bash
+```
+
+Also source ROS Noetic:
+
+```bash
+source /opt/ros/noetic/setup.bash
+```
+
+To avoid repeating this every time, add the source lines to `~/.bashrc` if appropriate.
+
+---
+
+## 3. Check that ROS can see the Allegro packages
+
+```bash
+rospack find allegro_hand_controllers
+```
+
+If this returns a valid path, the package is visible.
+
+You can also inspect the available launch files:
+
+```bash
+roscd allegro_hand_controllers
+find . -name "*.launch"
+```
+
+---
+
+## 4. Start the ROS master
+
+Open Terminal 1:
+
+```bash
+source /opt/ros/noetic/setup.bash
+source ~/ros_ws/devel/setup.bash
+roscore
+```
+
+Leave this running.
+
+---
+
+## 5. Launch the Allegro Hand
+
+Open Terminal 2:
+
+```bash
+source /opt/ros/noetic/setup.bash
+source ~/ros_ws/devel/setup.bash
+roslaunch allegro_hand_controllers allegro_hand.launch HAND:=right TYPE:=A
+```
+
+If you are using the left hand or a different hardware type, change the arguments accordingly.
+
+### What the arguments usually mean
+
+- `HAND:=right` or `HAND:=left` selects the hand side / namespace
+- `TYPE:=A` selects the hand hardware type expected by your package version
+
+If your package uses different arguments, inspect the launch file:
+
+```bash
+roslaunch --files allegro_hand_controllers allegro_hand.launch
+roslaunch --args allegro_hand_controllers allegro_hand.launch
+```
+
+---
+
+## 6. Verify that the hand is alive
+
+In Terminal 3:
+
+```bash
+source /opt/ros/noetic/setup.bash
+source ~/ros_ws/devel/setup.bash
+rostopic list
+```
+
+Look for topics similar to:
+
+```text
+/allegroHand_0/joint_states
+/allegroHand_left_0/joint_states
+/allegroHand/joint_cmd
+/allegroHand_0/joint_cmd
+```
+
+Then inspect the actual state topic:
+
+```bash
+rostopic echo /allegroHand_0/joint_states
+```
+
+If that does not exist, try:
+
+```bash
+rostopic echo /allegroHand_left_0/joint_states
+```
+
+This matters because in your earlier debugging, the script originally waited for:
+
+```text
+/allegroHand_left_0/joint_states
+```
+
+but the actual running topic turned out to be:
+
+```text
+/allegroHand_0/joint_states
+```
+
+---
+
+## 7. Check the command topic
+
+The controller usually consumes a `sensor_msgs/JointState` command topic. Check what exists:
+
+```bash
+rostopic list | grep joint_cmd
+```
+
+Then inspect its type:
+
+```bash
+rostopic type /allegroHand/joint_cmd
+```
+
+Expected result:
+
+```text
+sensor_msgs/JointState
+```
+
+---
+
+## 8. Minimal motion test
+
+Once the hand is safely powered and initialized, you can test publishing a small command.
+
+> Only do this if your hardware is safe to move and there are no collisions.
+
+Example:
+
+```bash
+rostopic pub -1 /allegroHand/joint_cmd sensor_msgs/JointState "
+header:
+  seq: 0
+  stamp: {secs: 0, nsecs: 0}
+  frame_id: ''
+name:
+  - joint_0.0
+  - joint_1.0
+  - joint_2.0
+  - joint_3.0
+  - joint_4.0
+  - joint_5.0
+  - joint_6.0
+  - joint_7.0
+  - joint_8.0
+  - joint_9.0
+  - joint_10.0
+  - joint_11.0
+  - joint_12.0
+  - joint_13.0
+  - joint_14.0
+  - joint_15.0
+position: [0.0, 0.1, 0.1, 0.1, 0.0, 0.1, 0.1, 0.1, 0.0, 0.1, 0.1, 0.1, 0.6, 0.2, 0.1, 0.1]
+velocity: []
+effort: []
+"
+```
+
+If your controller expects a different joint order or different joint names, use the names reported from `/joint_states`.
+
+---
+
+## 9. Recommended custom wrapper launch file
+
+If you want your own bringup launch file, create for example:
+
+`~/ros_ws/src/my_allegro_bringup/launch/allegro_right.launch`
+
+```xml
+<launch>
+  <arg name="hand" default="right"/>
+  <arg name="type" default="A"/>
+
+  <include file="$(find allegro_hand_controllers)/launch/allegro_hand.launch">
+    <arg name="HAND" value="$(arg hand)"/>
+    <arg name="TYPE" value="$(arg type)"/>
+  </include>
+</launch>
+```
+
+Run it with:
+
+```bash
+roslaunch my_allegro_bringup allegro_right.launch
+```
+
+This is useful when you want one stable entry point for your own scripts.
+
+---
+
+## 10. Common checks during debugging
+
+### A. No joint states appear
+
+Check:
+
+```bash
+rostopic list | grep allegro
+```
+
+If there are no Allegro topics at all, likely causes are:
+
+- the hardware driver did not start correctly
+- the launch file crashed early
+- the hand communication interface is not detected
+- the package namespace is different from what you expected
+
+### B. Script waits on the wrong topic
+
+This happened in your earlier setup. Fix the topic name in the script from:
+
+```text
+/allegroHand_left_0/joint_states
+```
+
+to:
+
+```text
+/allegroHand_0/joint_states
+```
+
+if that is what `rostopic list` shows.
+
+### C. Command topic exists but hand does not move
+
+Check:
+
+```bash
+rostopic hz /allegroHand/joint_cmd
+rostopic echo /allegroHand/joint_cmd
+```
+
+Also confirm:
+
+- the joint order is correct
+- the controller accepts `sensor_msgs/JointState`
+- the command values are within safe range
+- the hand power / hardware state is OK
+
+---
+
+## 11. Useful ROS 1 commands
+
+```bash
+rostopic list
+rostopic echo /allegroHand_0/joint_states
+rostopic echo /allegroHand/joint_cmd
+rostopic type /allegroHand/joint_cmd
+rostopic hz /allegroHand/joint_cmd
+rosnode list
+rosparam list | grep allegro
+```
+
+If your controller gains are exposed via ROS params, you may also inspect them with:
+
+```bash
+rosparam list | grep gains_pd
+```
+
+---
+
+## 12. Practical summary
+
+For a standard ROS 1 bringup, the simplest working sequence is:
+
+### Terminal 1
+```bash
+source /opt/ros/noetic/setup.bash
+source ~/ros_ws/devel/setup.bash
+roscore
+```
+
+### Terminal 2
+```bash
+source /opt/ros/noetic/setup.bash
+source ~/ros_ws/devel/setup.bash
+roslaunch allegro_hand_controllers allegro_hand.launch HAND:=right TYPE:=A
+```
+
+### Terminal 3
+```bash
+source /opt/ros/noetic/setup.bash
+source ~/ros_ws/devel/setup.bash
+rostopic list | grep allegro
+rostopic echo /allegroHand_0/joint_states
+```
+
+---
+
+## 13. When to use this ROS 1 guide
+
+Use this file when:
+
+- you want the **native Allegro driver/controller stack**
+- your hand already works in Noetic
+- you want to test teleop or learned policies through ROS 1 topics directly
+
+If your control pipeline is ROS 2 but the Allegro driver is still ROS 1, use the separate ROS 2 guide based on **ROS 2 + ros1_bridge + ROS 1 Allegro driver**.
